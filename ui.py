@@ -1,6 +1,6 @@
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
-from PIL import Image, ImageTk
+from PIL import Image, ImageTk, ImageDraw
 import threading
 from verifier import verify_faces
 import config
@@ -76,27 +76,32 @@ class FaceVerifierApp:
         self.score_label = tk.Label(self.root, text="", font=("Helvetica", 10), bg="#f0f0f0")
         self.score_label.pack()
 
-    def load_and_display(self, path, panel):
+    def load_and_display(self, path, panel, facial_area=None):
+        """
+        Loads an image, optionally draws a bounding box, and displays it.
+        """
         try:
-            # Open and resize image
-            img = Image.open(path)
-            # Use fixed size from config for preview
-            img = img.resize(config.IMAGE_SIZE, Image.Resampling.LANCZOS)
+            img = Image.open(path).convert("RGB")
             
-            # Convert to PhotoImage
+            # Draw bounding box if provided (Visual Debugging)
+            if facial_area:
+                draw = ImageDraw.Draw(img)
+                x, y, w, h = facial_area['x'], facial_area['y'], facial_area['w'], facial_area['h']
+                # Draw a bright green rectangle with thickness
+                for i in range(4): # Simulating thickness
+                    draw.rectangle([x-i, y-i, x+w+i, y+h+i], outline="#00ff00")
+                logger.info(f"Drew bounding box at {facial_area}")
+
+            # Resize for UI
+            img = img.resize(config.IMAGE_SIZE, Image.Resampling.LANCZOS)
             img_tk = ImageTk.PhotoImage(img)
             
-            # CRITICAL: Remove width/height constraints before showing image to avoid label clipping
             panel.configure(image=img_tk, text="", width=0, height=0)
-            
-            # Keep reference to avoid garbage collection
             panel.image = img_tk 
             
-            logger.info(f"Successfully displayed preview for: {path}")
         except Exception as e:
             logger.error(f"Error displaying image: {e}")
             messagebox.showerror("Error", f"Could not load image: {e}")
-
 
     def upload_img1(self):
         self.img1_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.jpg *.jpeg *.png")])
@@ -130,15 +135,35 @@ class FaceVerifierApp:
         self.verify_btn.config(state="normal", text="START VERIFICATION", bg="#27ae60")
         self.status_label.config(text="Verification completed.")
 
-        if "error" in result and result["distance"] in ["Error", "N/A"]:
-            self.result_label.config(text="No Face Detected!", fg="#e67e22")
+        # Check for facial areas to implement Visual Debugging
+        facial_areas = result.get("facial_areas", {})
+        if 'img1' in facial_areas:
+            self.load_and_display(self.img1_path, self.panel1, facial_areas['img1'])
+        if 'img2' in facial_areas:
+            self.load_and_display(self.img2_path, self.panel2, facial_areas['img2'])
+
+        # Build detailed score text for quality
+        quality_txt = ""
+        if 'quality' in result:
+            q1 = result['quality']['img1']
+            q2 = result['quality']['img2']
+            quality_txt = f"\nQuality Diagnostics:\nImg1 Blur: {q1['blur_score']:.1f}, Brightness: {q1['brightness_score']:.1f}\nImg2 Blur: {q2['blur_score']:.1f}, Brightness: {q2['brightness_score']:.1f}"
+
+        if "error" in result and result.get("distance") in ["Error", "N/A"]:
+            self.result_label.config(text="Assessment Failed!", fg="#e67e22")
             messagebox.showwarning("Notice", result["error"])
+            self.score_label.config(text=result["error"])
         elif result.get("verified"):
             self.result_label.config(text="MATCH VERIFIED ✅", fg="#27ae60")
-            self.score_label.config(text=f"Confidence Score (Cosine Distance): {result['distance']:.4f}")
+            self.score_label.config(text=f"Confidence Score (Cosine Distance): {result['distance']:.4f}" + quality_txt)
         else:
             self.result_label.config(text="IDENTITY MISMATCH ❌", fg="#c0392b")
-            self.score_label.config(text=f"Confidence Score (Cosine Distance): {result['distance']:.4f}")
+            distance = result.get('distance')
+            if isinstance(distance, (int, float)):
+                self.score_label.config(text=f"Confidence Score (Cosine Distance): {distance:.4f}" + quality_txt)
+            else:
+                self.score_label.config(text=f"Confidence Score: {distance}")
+
 
 if __name__ == "__main__":
     root = tk.Tk()
