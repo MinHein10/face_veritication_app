@@ -1,0 +1,27 @@
+# --- Project Specific Storage ---
+storage/
+temp_uploads/
+logs/*.log
+
+# --- Python ---
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+
+# --- DeepFace & TensorFlow Models ---
+# (Ignore if these downloaded to your project folder)
+.deepface/
+models/
+
+# --- IDEs & OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
