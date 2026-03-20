@@ -1,8 +1,14 @@
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, ttk, simpledialog
 from PIL import Image, ImageTk, ImageDraw
 import threading
+<<<<<<< Updated upstream
 from verifier import verify_faces
+=======
+from verifier import verify_faces, get_face_embedding
+from deepface import DeepFace
+from database import db
+>>>>>>> Stashed changes
 import config
 from logger import logger
 
@@ -61,10 +67,20 @@ class FaceVerifierApp:
         controls_frame = tk.Frame(self.root, bg="#f0f0f0")
         controls_frame.pack(pady=10)
 
-        self.verify_btn = tk.Button(controls_frame, text="START VERIFICATION", font=("Helvetica", 12, "bold"), 
-                                   bg="#27ae60", fg="white", width=25, height=2, command=self.start_verification_thread,
+        self.register_btn = tk.Button(controls_frame, text="REGISTER ID (DB)", font=("Helvetica", 10, "bold"), 
+                                   bg="#2980b9", fg="white", width=20, height=2, command=self.start_register_thread,
                                    relief="raised", cursor="hand2")
-        self.verify_btn.pack(pady=10)
+        self.register_btn.grid(row=0, column=0, padx=10, pady=5)
+
+        self.verify_btn = tk.Button(controls_frame, text="1:1 VERIFY", font=("Helvetica", 10, "bold"), 
+                                   bg="#27ae60", fg="white", width=20, height=2, command=self.start_verification_thread,
+                                   relief="raised", cursor="hand2")
+        self.verify_btn.grid(row=0, column=1, padx=10, pady=5)
+
+        self.recognize_btn = tk.Button(controls_frame, text="RECOGNIZE (DB)", font=("Helvetica", 10, "bold"), 
+                                   bg="#8e44ad", fg="white", width=20, height=2, command=self.start_recognize_thread,
+                                   relief="raised", cursor="hand2")
+        self.recognize_btn.grid(row=0, column=2, padx=10, pady=5)
 
         self.status_label = tk.Label(self.root, text="Ready", bd=1, relief="sunken", anchor="w")
         self.status_label.pack(side="bottom", fill="x")
@@ -163,6 +179,88 @@ class FaceVerifierApp:
                 self.score_label.config(text=f"Confidence Score (Cosine Distance): {distance:.4f}" + quality_txt)
             else:
                 self.score_label.config(text=f"Confidence Score: {distance}")
+
+    def start_register_thread(self):
+        if not self.img1_path:
+            messagebox.showwarning("Incomplete Data", "Please upload Photo 1 (ID) to register.")
+            return
+            
+        user_id = simpledialog.askstring("Input", "Enter a User ID for this face:", parent=self.root)
+        if not user_id:
+            return
+            
+        self.register_btn.config(state="disabled", text="REGISTERING...", bg="#95a5a6")
+        self.status_label.config(text="Extracting face and saving to database...")
+        self.result_label.config(text="")
+        self.score_label.config(text="")
+
+        thread = threading.Thread(target=self.run_register, args=(user_id,))
+        thread.start()
+
+    def run_register(self, user_id):
+        extraction = get_face_embedding(self.img1_path, is_source=True)
+        if not extraction["success"]:
+            self.root.after(0, lambda: self.show_register_result(False, extraction["error"]))
+            return
+            
+        success, msg = db.add_face(user_id, extraction["embedding"], metadata={"source": "desktop_ui"})
+        self.root.after(0, lambda: self.show_register_result(success, msg))
+        
+    def show_register_result(self, success, msg):
+        self.register_btn.config(state="normal", text="REGISTER ID (DB)", bg="#2980b9")
+        self.status_label.config(text="Database action completed.")
+        
+        if success:
+            self.result_label.config(text="REGISTRATION SUCCESS ✅", fg="#27ae60")
+            self.score_label.config(text=msg)
+            messagebox.showinfo("Success", msg)
+        else:
+            self.result_label.config(text="REGISTRATION FAILED ❌", fg="#c0392b")
+            self.score_label.config(text=msg)
+            messagebox.showwarning("Notice", msg)
+
+    def start_recognize_thread(self):
+        if not self.img2_path:
+            messagebox.showwarning("Incomplete Data", "Please upload Photo 2 for recognition.")
+            return
+            
+        self.recognize_btn.config(state="disabled", text="SEARCHING...", bg="#95a5a6")
+        self.status_label.config(text="Searching database for match...")
+        self.result_label.config(text="")
+        self.score_label.config(text="")
+
+        thread = threading.Thread(target=self.run_recognize)
+        thread.start()
+        
+    def run_recognize(self):
+        extraction = get_face_embedding(self.img2_path, is_source=False)
+        if not extraction["success"]:
+            self.root.after(0, lambda: self.show_recognize_result({"verified": False, "match": None, "distance": "N/A", "error": extraction["error"]}))
+            return
+            
+        result = db.search_face(extraction["embedding"])
+        self.root.after(0, lambda: self.show_recognize_result(result))
+        
+    def show_recognize_result(self, result):
+        self.recognize_btn.config(state="normal", text="RECOGNIZE (DB)", bg="#8e44ad")
+        self.status_label.config(text="Search completed.")
+        
+        err = result.get("error")
+        if err and result.get("distance") in ["Error", "N/A"]:
+            self.result_label.config(text="SEARCH FAILED!", fg="#e67e22")
+            messagebox.showwarning("Notice", err)
+            self.score_label.config(text=err)
+        elif result.get("verified"):
+            self.result_label.config(text="IDENTITY FOUND ✅", fg="#27ae60")
+            msg = f"Match: {result['match']} \nConfidence Score (Distance): {result['distance']:.4f}"
+            self.score_label.config(text=msg)
+        else:
+            self.result_label.config(text="NO MATCH FOUND ❌", fg="#c0392b")
+            if result.get("distance", "N/A") != "N/A":
+                msg = f"No match within threshold. Closest was {result.get('closest_id')} at distance {result.get('distance'):.4f}"
+            else:
+                msg = result.get("error", "Not found.")
+            self.score_label.config(text=msg)
 
 
 if __name__ == "__main__":

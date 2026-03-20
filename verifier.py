@@ -123,5 +123,45 @@ def verify_faces(img1_path, img2_path):
         logger.error(f"Unexpected error during verification: {e}")
         return {"verified": False, "distance": "Error", "error": str(e)}
 
+def get_face_embedding(img_path, is_source=True):
+    """
+    Extracts the face embedding using current DeepFace settings.
+    Used for vector database storage and searches.
+    """
+    logger.info(f"Extracting embedding for: {img_path}")
+    
+    # Perform Quality Assessment
+    ok, msg, q = check_image_quality(img_path, is_source=is_source)
+    
+    if not ok:
+        logger.warning(f"Quality Failed: {msg}")
+        return {"success": False, "embedding": None, "error": f"Quality: {msg}"}
+
+    try:
+        # DeepFace.represent returns a list of dictionaries (one for each face found)
+        results = DeepFace.represent(
+            img_path=img_path,
+            model_name=config.MODEL_NAME,
+            detector_backend=config.DETECTOR_BACKEND,
+            align=config.ALIGN,
+            enforce_detection=config.ENFORCE_DETECTION
+        )
+        
+        if not results or len(results) == 0:
+            return {"success": False, "embedding": None, "error": "No face detected"}
+            
+        # Get the first face's embedding
+        embedding = results[0]["embedding"]
+        logger.info(f"Successfully extracted embedding (length: {len(embedding)})")
+        
+        return {"success": True, "embedding": embedding, "quality": q}
+
+    except ValueError as ve:
+        logger.warning(f"Face detection failed during extraction: {ve}")
+        return {"success": False, "embedding": None, "error": f"No face detected: {str(ve)}"}
+    except Exception as e:
+        logger.error(f"Unexpected error during extraction: {e}")
+        return {"success": False, "embedding": None, "error": str(e)}
+
 
 

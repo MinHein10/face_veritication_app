@@ -1,3 +1,6 @@
+import os
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+
 import tkinter as tk
 from ui import FaceVerifierApp
 from logger import logger

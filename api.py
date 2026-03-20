@@ -1,9 +1,18 @@
 import os
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
+
 import shutil
 import uuid
+<<<<<<< Updated upstream
 from fastapi import FastAPI, File, UploadFile, HTTPException
+=======
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, File, UploadFile, HTTPException, Form
+from deepface import DeepFace
+>>>>>>> Stashed changes
 from fastapi.middleware.cors import CORSMiddleware
-from verifier import verify_faces
+from verifier import verify_faces, get_face_embedding
+from database import db
 from logger import logger
 import config
 
@@ -72,6 +81,83 @@ async def verify(file1: UploadFile = File(...), file2: UploadFile = File(...)):
 
     except Exception as e:
         logger.error(f"API Error in session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/register")
+async def register_face(user_id: str = Form(...), file: UploadFile = File(...)):
+    """
+    Registers a new user's face into the Vector Database.
+    """
+    session_id = str(uuid.uuid4())
+    img_path = os.path.join(UPLOAD_DIR, f"reg_{session_id}_{file.filename}")
+
+    try:
+        with open(img_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        logger.info(f"Registration request for user: {user_id}")
+        
+        # Extract embedding
+        extraction = get_face_embedding(img_path, is_source=True)
+        
+        if not extraction["success"]:
+            raise HTTPException(status_code=400, detail=extraction["error"])
+            
+        # Add to vector DB
+        success, msg = db.add_face(user_id, extraction["embedding"], metadata={"filename": file.filename})
+        
+        if not success:
+            raise HTTPException(status_code=500, detail=msg)
+            
+        # Clean up
+        if os.path.exists(img_path):
+            os.remove(img_path)
+            
+        return {
+            "status": "success",
+            "message": msg,
+            "user_id": user_id,
+            "quality": extraction["quality"]
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Registration Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/recognize")
+async def recognize_face(file: UploadFile = File(...)):
+    """
+    Identifies a person from a live photo using the Vector Database.
+    """
+    session_id = str(uuid.uuid4())
+    img_path = os.path.join(UPLOAD_DIR, f"rec_{session_id}_{file.filename}")
+
+    try:
+        with open(img_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            
+        logger.info("Recognition request received.")
+        
+        # Extract embedding
+        extraction = get_face_embedding(img_path, is_source=False)
+        
+        if not extraction["success"]:
+            raise HTTPException(status_code=400, detail=extraction["error"])
+            
+        # Search the database
+        result = db.search_face(extraction["embedding"])
+        
+        # Clean up
+        if os.path.exists(img_path):
+            os.remove(img_path)
+            
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Recognition Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
