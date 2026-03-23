@@ -2,13 +2,9 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, simpledialog
 from PIL import Image, ImageTk, ImageDraw
 import threading
-<<<<<<< Updated upstream
-from verifier import verify_faces
-=======
 from verifier import verify_faces, get_face_embedding
 from deepface import DeepFace
 from database import db
->>>>>>> Stashed changes
 import config
 from logger import logger
 
@@ -21,7 +17,7 @@ class FaceVerifierApp:
 
         self.img1_path = None
         self.img2_path = None
-        
+
         # UI Elements declaration
         self.frame1 = None
         self.panel1 = None
@@ -31,8 +27,29 @@ class FaceVerifierApp:
         self.status_label = None
         self.result_label = None
         self.score_label = None
-        
+
         self.setup_ui()
+
+        # Start model pre-loading in a background thread
+        threading.Thread(target=self.preload_models, daemon=True).start()
+
+    def preload_models(self):
+        """Pre-loads DeepFace models so the first verification is fast."""
+        try:
+            if hasattr(self, 'status_label') and self.status_label:
+                self.status_label.config(text="System initializing: Loading AI models...")
+
+            logger.info(f"Background pre-loading model: {config.MODEL_NAME}")
+            # This identifies the model and detector to use
+            DeepFace.build_model(config.MODEL_NAME)
+
+            logger.info("Background model loading complete.")
+            if hasattr(self, 'status_label') and self.status_label:
+                self.status_label.config(text="Ready")
+        except Exception as e:
+            logger.error(f"Error pre-loading models: {e}")
+            if hasattr(self, 'status_label') and self.status_label:
+                self.status_label.config(text="Initialization error. Check logs.")
 
 
     def setup_ui(self):
@@ -67,17 +84,17 @@ class FaceVerifierApp:
         controls_frame = tk.Frame(self.root, bg="#f0f0f0")
         controls_frame.pack(pady=10)
 
-        self.register_btn = tk.Button(controls_frame, text="REGISTER ID (DB)", font=("Helvetica", 10, "bold"), 
+        self.register_btn = tk.Button(controls_frame, text="REGISTER ID (DB)", font=("Helvetica", 10, "bold"),
                                    bg="#2980b9", fg="white", width=20, height=2, command=self.start_register_thread,
                                    relief="raised", cursor="hand2")
         self.register_btn.grid(row=0, column=0, padx=10, pady=5)
 
-        self.verify_btn = tk.Button(controls_frame, text="1:1 VERIFY", font=("Helvetica", 10, "bold"), 
+        self.verify_btn = tk.Button(controls_frame, text="1:1 VERIFY", font=("Helvetica", 10, "bold"),
                                    bg="#27ae60", fg="white", width=20, height=2, command=self.start_verification_thread,
                                    relief="raised", cursor="hand2")
         self.verify_btn.grid(row=0, column=1, padx=10, pady=5)
 
-        self.recognize_btn = tk.Button(controls_frame, text="RECOGNIZE (DB)", font=("Helvetica", 10, "bold"), 
+        self.recognize_btn = tk.Button(controls_frame, text="RECOGNIZE (DB)", font=("Helvetica", 10, "bold"),
                                    bg="#8e44ad", fg="white", width=20, height=2, command=self.start_recognize_thread,
                                    relief="raised", cursor="hand2")
         self.recognize_btn.grid(row=0, column=2, padx=10, pady=5)
@@ -98,7 +115,7 @@ class FaceVerifierApp:
         """
         try:
             img = Image.open(path).convert("RGB")
-            
+
             # Draw bounding box if provided (Visual Debugging)
             if facial_area:
                 draw = ImageDraw.Draw(img)
@@ -111,10 +128,10 @@ class FaceVerifierApp:
             # Resize for UI
             img = img.resize(config.IMAGE_SIZE, Image.Resampling.LANCZOS)
             img_tk = ImageTk.PhotoImage(img)
-            
+
             panel.configure(image=img_tk, text="", width=0, height=0)
-            panel.image = img_tk 
-            
+            panel.image = img_tk
+
         except Exception as e:
             logger.error(f"Error displaying image: {e}")
             messagebox.showerror("Error", f"Could not load image: {e}")
@@ -184,11 +201,11 @@ class FaceVerifierApp:
         if not self.img1_path:
             messagebox.showwarning("Incomplete Data", "Please upload Photo 1 (ID) to register.")
             return
-            
+
         user_id = simpledialog.askstring("Input", "Enter a User ID for this face:", parent=self.root)
         if not user_id:
             return
-            
+
         self.register_btn.config(state="disabled", text="REGISTERING...", bg="#95a5a6")
         self.status_label.config(text="Extracting face and saving to database...")
         self.result_label.config(text="")
@@ -202,14 +219,14 @@ class FaceVerifierApp:
         if not extraction["success"]:
             self.root.after(0, lambda: self.show_register_result(False, extraction["error"]))
             return
-            
+
         success, msg = db.add_face(user_id, extraction["embedding"], metadata={"source": "desktop_ui"})
         self.root.after(0, lambda: self.show_register_result(success, msg))
-        
+
     def show_register_result(self, success, msg):
         self.register_btn.config(state="normal", text="REGISTER ID (DB)", bg="#2980b9")
         self.status_label.config(text="Database action completed.")
-        
+
         if success:
             self.result_label.config(text="REGISTRATION SUCCESS ✅", fg="#27ae60")
             self.score_label.config(text=msg)
@@ -223,7 +240,7 @@ class FaceVerifierApp:
         if not self.img2_path:
             messagebox.showwarning("Incomplete Data", "Please upload Photo 2 for recognition.")
             return
-            
+
         self.recognize_btn.config(state="disabled", text="SEARCHING...", bg="#95a5a6")
         self.status_label.config(text="Searching database for match...")
         self.result_label.config(text="")
@@ -231,20 +248,20 @@ class FaceVerifierApp:
 
         thread = threading.Thread(target=self.run_recognize)
         thread.start()
-        
+
     def run_recognize(self):
         extraction = get_face_embedding(self.img2_path, is_source=False)
         if not extraction["success"]:
             self.root.after(0, lambda: self.show_recognize_result({"verified": False, "match": None, "distance": "N/A", "error": extraction["error"]}))
             return
-            
+
         result = db.search_face(extraction["embedding"])
         self.root.after(0, lambda: self.show_recognize_result(result))
-        
+
     def show_recognize_result(self, result):
         self.recognize_btn.config(state="normal", text="RECOGNIZE (DB)", bg="#8e44ad")
         self.status_label.config(text="Search completed.")
-        
+
         err = result.get("error")
         if err and result.get("distance") in ["Error", "N/A"]:
             self.result_label.config(text="SEARCH FAILED!", fg="#e67e22")

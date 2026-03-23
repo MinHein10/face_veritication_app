@@ -3,23 +3,34 @@ os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
 import shutil
 import uuid
-<<<<<<< Updated upstream
-from fastapi import FastAPI, File, UploadFile, HTTPException
-=======
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, UploadFile, HTTPException, Form
 from deepface import DeepFace
->>>>>>> Stashed changes
 from fastapi.middleware.cors import CORSMiddleware
 from verifier import verify_faces, get_face_embedding
 from database import db
 from logger import logger
 import config
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Pre-load models to avoid cold-start lag
+    try:
+        logger.info(f"Pre-loading model: {config.MODEL_NAME} with {config.DETECTOR_BACKEND} backend...")
+        # We call build_model to force weight download and initialization
+        DeepFace.build_model(config.MODEL_NAME)
+        logger.info("DeepFace models loaded successfully!")
+    except Exception as e:
+        logger.error(f"Failed to pre-load models: {e}")
+
+    yield
+    # Shutdown logic (if any) could go here
+
 app = FastAPI(
     title="Face Verification API",
-    description="REST API for professional face verification using DeepFace (ArcFace/RetinaFace)",
-    version="1.0.0"
+    description="REST API for professional face verification using DeepFace (Facenet512/MTCNN)",
+    version="1.1.0",
+    lifespan=lifespan
 )
 
 # Enable CORS for Laravel/Frontend integration
@@ -68,10 +79,10 @@ async def verify(file1: UploadFile = File(...), file2: UploadFile = File(...)):
             shutil.copyfileobj(file2.file, buffer)
 
         logger.info(f"API Request received. Session: {session_id}")
-        
+
         # Run verification logic (includes Quality check)
         result = verify_faces(img1_path, img2_path)
-        
+
         # Cleanup temporary files (optional, but recommended for production)
         # Note: If you need these for a shared storage approach, don't delete yet.
         # os.remove(img1_path)
@@ -94,25 +105,25 @@ async def register_face(user_id: str = Form(...), file: UploadFile = File(...)):
     try:
         with open(img_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-            
+
         logger.info(f"Registration request for user: {user_id}")
-        
+
         # Extract embedding
         extraction = get_face_embedding(img_path, is_source=True)
-        
+
         if not extraction["success"]:
             raise HTTPException(status_code=400, detail=extraction["error"])
-            
+
         # Add to vector DB
         success, msg = db.add_face(user_id, extraction["embedding"], metadata={"filename": file.filename})
-        
+
         if not success:
             raise HTTPException(status_code=500, detail=msg)
-            
+
         # Clean up
         if os.path.exists(img_path):
             os.remove(img_path)
-            
+
         return {
             "status": "success",
             "message": msg,
@@ -136,24 +147,24 @@ async def recognize_face(file: UploadFile = File(...)):
     try:
         with open(img_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-            
+
         logger.info("Recognition request received.")
-        
+
         # Extract embedding
         extraction = get_face_embedding(img_path, is_source=False)
-        
+
         if not extraction["success"]:
             raise HTTPException(status_code=400, detail=extraction["error"])
-            
+
         # Search the database
         result = db.search_face(extraction["embedding"])
-        
+
         # Clean up
         if os.path.exists(img_path):
             os.remove(img_path)
-            
+
         return result
-        
+
     except HTTPException:
         raise
     except Exception as e:

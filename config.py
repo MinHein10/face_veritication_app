@@ -1,8 +1,8 @@
 # Face Verification System Configuration
 
 # DeepFace Settings
-MODEL_NAME = "ArcFace"
-DETECTOR_BACKEND = "retinaface"
+MODEL_NAME = "Facenet512"
+DETECTOR_BACKEND = "mtcnn"
 DISTANCE_METRIC = "cosine"
 ALIGN = True
 ENFORCE_DETECTION = True
