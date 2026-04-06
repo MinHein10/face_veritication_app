@@ -2,13 +2,9 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, simpledialog
 from PIL import Image, ImageTk, ImageDraw
 import threading
-<<<<<<< Updated upstream
-from verifier import verify_faces
-=======
 from verifier import verify_faces, get_face_embedding
 from deepface import DeepFace
 from database import db
->>>>>>> Stashed changes
 import config
 from logger import logger
 
