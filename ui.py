@@ -2,6 +2,8 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, simpledialog
 from PIL import Image, ImageTk, ImageDraw
 import threading
+import cv2
+import os
 from verifier import verify_faces, get_face_embedding
 from deepface import DeepFace
 from database import db
@@ -27,11 +29,25 @@ class FaceVerifierApp:
         self.status_label = None
         self.result_label = None
         self.score_label = None
+        
+        # Webcam tracking variables
+        self.cap = None
+        self.webcam_active = False
+        self.latest_frame = None
 
         self.setup_ui()
+        
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
         # Start model pre-loading in a background thread
         threading.Thread(target=self.preload_models, daemon=True).start()
+
+    def on_closing(self):
+        """Cleanly releases the webcam if the user closes the app."""
+        self.webcam_active = False
+        if self.cap is not None:
+            self.cap.release()
+        self.root.destroy()
 
     def preload_models(self):
         """Pre-loads DeepFace models so the first verification is fast."""
@@ -73,12 +89,18 @@ class FaceVerifierApp:
         self.panel1.pack()
         tk.Button(self.frame1, text="Select Photo 1", command=self.upload_img1, bg="#34495e", fg="white", relief="flat", padx=10).pack(pady=10)
 
-        # Right Panel (Live Photo)
-        self.frame2 = tk.LabelFrame(img_frame, text="Photo 2 (Verification Target)", padx=10, pady=10, bg="white")
+        # Right Panel (Live Photo / Target)
+        self.frame2 = tk.LabelFrame(img_frame, text="Photo 2 (Live Target)", padx=10, pady=10, bg="white")
         self.frame2.grid(row=0, column=1, padx=20)
-        self.panel2 = tk.Label(self.frame2, text="No Image Uploaded", bg="#ecf0f1", width=30, height=15)
+        self.panel2 = tk.Label(self.frame2, text="No Image Uploaded", bg="#ecf0f1", width=40, height=20)
         self.panel2.pack()
-        tk.Button(self.frame2, text="Select Photo 2", command=self.upload_img2, bg="#34495e", fg="white", relief="flat", padx=10).pack(pady=10)
+
+        btn_frame2 = tk.Frame(self.frame2, bg="white")
+        btn_frame2.pack(pady=10)
+        tk.Button(btn_frame2, text="Upload File", command=self.upload_img2, bg="#34495e", fg="white", relief="flat", padx=10).grid(row=0, column=0, padx=5)
+        
+        self.webcam_btn = tk.Button(btn_frame2, text="Turn On Webcam", command=self.toggle_webcam, bg="#e67e22", fg="white", relief="flat", padx=10, font=("Helvetica", 9, "bold"))
+        self.webcam_btn.grid(row=0, column=1, padx=5)
 
         # Controls & Status
         controls_frame = tk.Frame(self.root, bg="#f0f0f0")
@@ -142,13 +164,76 @@ class FaceVerifierApp:
             self.load_and_display(self.img1_path, self.panel1)
 
     def upload_img2(self):
+        if self.webcam_active:
+            messagebox.showwarning("Notice", "Please snap your photo or turn off the webcam first.")
+            return
         self.img2_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.jpg *.jpeg *.png")])
         if self.img2_path:
             self.load_and_display(self.img2_path, self.panel2)
 
+    def toggle_webcam(self):
+        """In-line webcam toggle: Turns panel 2 into a live video feed, or snaps a photo if active."""
+        if not self.webcam_active:
+            # Turn ON webcam mode
+            self.cap = cv2.VideoCapture(0)
+            if not self.cap.isOpened():
+                messagebox.showerror("Error", "Could not access the camera.")
+                return
+            
+            self.webcam_active = True
+            self.img2_path = None # Clear previous
+            
+            # Change button to SNAP mode
+            self.webcam_btn.config(text="📸 SNAP PHOTO!", bg="#e74c3c", width=15) 
+            self.status_label.config(text="Webcam active. Look at camera and snap photo.")
+            
+            self.update_webcam_feed()
+        else:
+            # We are active, so this click means SNAP PHOTO
+            if hasattr(self, 'latest_frame') and self.latest_frame is not None:
+                capture_dir = "temp_uploads"
+                if not os.path.exists(capture_dir):
+                    os.makedirs(capture_dir)
+                    
+                path = os.path.join(capture_dir, "live_capture.jpg")
+                cv2.imwrite(path, self.latest_frame)
+                
+                # Turn OFF webcam mode
+                self.webcam_active = False
+                if self.cap:
+                    self.cap.release()
+                    self.cap = None
+                
+                # Revert button and load the captured image
+                self.webcam_btn.config(text="Retake Webcam", bg="#e67e22", width=15)
+                self.img2_path = os.path.abspath(path)
+                self.load_and_display(self.img2_path, self.panel2)
+                
+                self.status_label.config(text="Photo securely captured! You may now VERIFY or RECOGNIZE.")
+
+    def update_webcam_feed(self):
+        """Continuously update the UI label with live video frames."""
+        if self.webcam_active and hasattr(self, 'cap') and self.cap.isOpened():
+            ret, frame = self.cap.read()
+            if ret:
+                frame = cv2.flip(frame, 1) # Mirror reflection
+                self.latest_frame = frame
+                
+                # Convert for Tkinter
+                cv2image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                img = Image.fromarray(cv2image)
+                # Use the exact same standard configuration size for perfect 1:1 layout display!
+                img = img.resize(config.IMAGE_SIZE, Image.Resampling.LANCZOS)
+                img_tk = ImageTk.PhotoImage(image=img)
+                
+                self.panel2.configure(image=img_tk, text="", width=0, height=0)
+                self.panel2.image = img_tk
+                
+            self.root.after(30, self.update_webcam_feed)
+
     def start_verification_thread(self):
         if not self.img1_path or not self.img2_path:
-            messagebox.showwarning("Incomplete Data", "Please upload both images first.")
+            messagebox.showwarning("Incomplete Data", "Please select Photo 1 and Photo 2.")
             return
 
         self.verify_btn.config(state="disabled", text="PROCESSING...", bg="#95a5a6")
@@ -238,7 +323,7 @@ class FaceVerifierApp:
 
     def start_recognize_thread(self):
         if not self.img2_path:
-            messagebox.showwarning("Incomplete Data", "Please upload Photo 2 for recognition.")
+            messagebox.showwarning("Incomplete Data", "Please upload Photo 2 or take a Live Photo for recognition.")
             return
 
         self.recognize_btn.config(state="disabled", text="SEARCHING...", bg="#95a5a6")
